@@ -3,4 +3,4 @@
 venv
 env
 config/env.yml
-.idea
+*.idea*

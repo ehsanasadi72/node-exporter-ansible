@@ -1,0 +1,29 @@
+- name: stop node_exporter service
+  ansible.builtin.service:
+    name: node_exporter.service
+    state: stopped
+
+- name: stop node_exporter service
+  ansible.builtin.service:
+    daemon_reload: true
+
+- name: Remove node_exporter file
+  ansible.builtin.file:
+    path: /usr/local/bin/node_exporter
+    state: absent
+
+- name: Remove node_exporter etc dir
+  ansible.builtin.file:
+    path: /etc/node_exporter
+    state: absent
+
+- name: Remove node_exporter service
+  ansible.builtin.file:
+    path:  /etc/systemd/system/node_exporter.service
+    state: absent
+
+- name: added exporter user
+  ansible.builtin.user:
+    name: node_exporter
+    state: absent
+    remove: yes

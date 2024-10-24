@@ -1,0 +1,106 @@
+- name: added exporter user
+  ansible.builtin.user:
+    name: node_exporter
+    shell: /bin/false
+    create_home: false
+
+- name: Download file with check (md5)
+  ansible.builtin.get_url:
+    url: https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+    dest: /tmp/node_exporter-1.7.0.linux-amd64.tar.gz
+    checksum: sha256:a550cd5c05f760b7934a2d0afad66d2e92e681482f5f57a917465b1fba3b02a6
+
+- name: Extract file
+  ansible.builtin.unarchive:
+    src: /tmp/node_exporter-1.7.0.linux-amd64.tar.gz
+    dest: /tmp
+    remote_src: yes
+
+- name: Copy exporter file to local bin
+  copy:
+    src: /tmp/node_exporter-1.7.0.linux-amd64/node_exporter
+    dest: /usr/local/bin/
+    remote_src: yes
+    owner: node_exporter
+    group: node_exporter
+    mode: '0755'
+
+- name: Create path
+  file:
+    path: /etc/node_exporter/certs
+    owner: node_exporter
+    group: node_exporter
+    mode: 0755
+    state: directory
+
+
+- name: Get a ip
+  shell: hostname -I | grep -Eo '\b192\.168\.[0-9]+\.[0-9]+\b' | head -n 1
+  register: host_ip
+
+
+- name: Generate an OpenSSL private key.
+  community.crypto.openssl_privatekey:
+    path: /etc/node_exporter/certs/node_exporter.key
+    size: 2048
+    type: RSA
+
+- name: Generate an OpenSSL CSR.
+  community.crypto.openssl_csr:
+    path: /etc/node_exporter/certs/node_exporter.csr
+    privatekey_path: /etc/node_exporter/certs/node_exporter.key
+    subject_alt_name: 'DNS:{{ host_ip.stdout }}'
+    common_name: '{{ host_ip.stdout }}'
+
+- name: Generate a Self Signed OpenSSL certificate
+  community.crypto.x509_certificate:
+    path: /etc/node_exporter/certs/node_exporter.crt
+    privatekey_path: /etc/node_exporter/certs/node_exporter.key
+    csr_path: /etc/node_exporter/certs/node_exporter.csr
+    provider: selfsigned
+    force: true
+
+- name: Copy node_exporter config
+  copy:
+    src: ./files/config-tls.yml
+    dest: /etc/node_exporter/config.yml
+
+- name: Change file ownership, group and permissions
+  ansible.builtin.file:
+    path: /etc/node_exporter/
+    owner: node_exporter
+    group: node_exporter
+    mode: '0755'
+    recurse: true
+
+- name: sed username for basic auth
+  ansible.builtin.replace:
+    path: /etc/node_exporter/config.yml
+    regexp: "<username>"
+    replace: "{{ basic_auth_user }}"
+
+- name: sed password for basic auth
+  ansible.builtin.replace:
+    path: /etc/node_exporter/config.yml
+    regexp: '<password>'
+    replace: "{{ basic_auth_pass | password_hash('bcrypt') }}"
+
+- name: Copy node_exporter service
+  copy:
+    src: ./files/node_exporter.service
+    dest:  /etc/systemd/system/node_exporter.service
+
+- name: start node_exporter service
+  ansible.builtin.service:
+    name: node_exporter.service
+    state: started
+    enabled: yes
+    daemon_reload: true
+
+- name: Allow all access to tcp port 9100
+  community.general.ufw:
+    rule: allow
+    port: '9100'
+    src: "{{ monitoring_ip }}"
+    proto: tcp
+
